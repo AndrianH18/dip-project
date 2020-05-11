@@ -1,5 +1,6 @@
 # dip-project
-Codes for EE3080 DIP Project (Autonomous Landing on Moving Platform)  
+Codes for EE3080 DIP Project (Autonomous Landing on Moving Platform).
+Under supervision of Prof. Meng Hiot.  
 
 ## Description
 Codes in this repository:  
