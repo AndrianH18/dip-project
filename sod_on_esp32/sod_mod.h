@@ -41,6 +41,11 @@
 
 #include <Arduino.h>
 
+/* Ensure compatibility with CPP program (Arduino sketch). */
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #define SOD_IMG_COLOR     0 /* Load full color channels. */
 #define SOD_IMG_GRAYSCALE 1 /* Load an image in the grayscale colorpsace only (single channel). */
 
@@ -97,7 +102,7 @@ struct sod_img {
 	int h;   /* Image/frame height */
 	int w;   /* Image/frame width */
 	int c;   /* Image depth/Total number of color channels e.g. 1 for grayscale images, 3 RGB, etc. */
-	float *data; /* Blob */
+	uint8_t *data; /* Blob */
 };
 /*
  * An instance of the `sod_pts` structure describe a 2D point in space with integer coordinates
@@ -114,11 +119,6 @@ struct sod_pts {
 
 /* Function prototypes */
 
-/* Normalization function, to convert 8-bit (0-255) pixel data from the ESP32-CAM to 4-byte float for SOD */
-// Input : pixel data pointer (fd) as returned by esp_camera_fb_get().
-// Output: sod_img structure of the converted image.
-
-
 /* Freeing functions */
 void sod_free_image(sod_img m);
 void sod_hough_lines_release(sod_pts * pLines);
@@ -129,8 +129,8 @@ sod_img sod_make_image(int w, int h, int c);
 sod_img sod_copy_image(sod_img m);
 
 /* Drawing functions */
-static inline void set_pixel(sod_img m, int x, int y, int c, float val);
-void sod_image_draw_line(sod_img im, sod_pts start, sod_pts end, float r, float g, float b);
+static inline void set_pixel(sod_img m, int x, int y, int c, uint8_t val);
+void sod_image_draw_line(sod_img im, sod_pts start, sod_pts end, uint8_t r, uint8_t g, uint8_t b);
 
 /* Gaussian noise reduce */
 /* INPUT IMAGE MUST BE GRAYSCALE */
@@ -144,5 +144,9 @@ sod_pts * sod_hough_lines_detect(sod_img im, int threshold, int *nPts);
 
 /* Hilditch thinning */
 sod_img sod_hilditch_thin_image(sod_img im);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif  // _SOD_H_
