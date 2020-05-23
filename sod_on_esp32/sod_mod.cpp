@@ -190,12 +190,12 @@ void sod_image_draw_line(sod_img im, sod_pts start, sod_pts end, uint8_t r, uint
 /* Gaussian noise reduce */
 /* INPUT IMAGE MUST BE GRAYSCALE */
 
-sod_img sod_gaussian_noise_reduce(sod_img grayscale)
+
+void sod_gaussian_noise_reduce(sod_img grayscale, sod_img out)
 {
 	int w, h, x, y, max_x, max_y;
-	sod_img img_out;
 	if (!grayscale.data || grayscale.c != SOD_IMG_GRAYSCALE) {
-		return sod_make_empty_image(0, 0, 0);
+		return ;
 	}
 	w = grayscale.w;
 	h = grayscale.h;
@@ -233,7 +233,59 @@ sod_img sod_gaussian_noise_reduce(sod_img grayscale)
 			}
 		}
 	}
-	return img_out;
+	return;
+}
+
+// Sobel operator for edge detection
+
+void sod_sobel_image(sod_img im, sod_img out)
+{
+	int weight[3][3] = { { -1,  0,  1 },
+	{ -2,  0,  2 },
+	{ -1,  0,  1 } };
+	int pixel_value;
+	int min, max;
+	int x, y, i, j;  /* Loop variable */
+
+	if (!im.data || im.c != SOD_IMG_GRAYSCALE) {
+		/* Only grayscale images */
+		return;
+	}
+	out = sod_make_image(im.w, im.h, im.c);
+	if (!out.data) {
+		return;
+	}
+	/* Maximum values calculation after filtering*/
+	min = 4*255;
+	max = -4*255;
+	for (y = 1; y < im.h - 1; y++) {
+		for (x = 1; x < im.w - 1; x++) {
+			pixel_value = 0;
+			for (j = -1; j <= 1; j++) {
+				for (i = -1; i <= 1; i++) {
+					pixel_value += weight[j + 1][i + 1] * im.data[(im.w * (y + j)) + x + i];
+				}
+			}
+			if (pixel_value < min) min = pixel_value;
+			if (pixel_value > max) max = pixel_value;
+		}
+	}
+	if ((max - min) == 0) {
+		return;
+	}
+	/* Generation of image2 after linear transformation */
+	for (y = 1; y < out.h - 1; y++) {
+		for (x = 1; x < out.w - 1; x++) {
+			pixel_value = 0;
+			for (j = -1; j <= 1; j++) {
+				for (i = -1; i <= 1; i++) {
+					pixel_value += weight[j + 1][i + 1] * im.data[(im.w * (y + j)) + x + i];
+				}
+			}
+			out.data[out.w * y + x] = (uint8_t)((float) (pixel_value - min) / (max - min) * 255);
+		}
+	}
+	return;
 }
 
 /* Sobel operator, needed for Canny edge detection */
