@@ -132,9 +132,20 @@ sod_img sod_copy_image(sod_img m);
 static inline void set_pixel(sod_img m, int x, int y, int c, uint8_t val);
 void sod_image_draw_line(sod_img im, sod_pts start, sod_pts end, uint8_t r, uint8_t g, uint8_t b);
 
+
+/* Threshold function */
+void sod_threshold_image(sod_img im, uint8_t thresh);
+void sod_sobel_threshold_image(sod_img im, uint8_t thresh);
+
+/* Otsu Threshold function */
+void sod_otsu_binarize_image(sod_img im);
+
 /* Gaussian noise reduce */
 /* INPUT IMAGE MUST BE GRAYSCALE */
 sod_img sod_gaussian_noise_reduce(sod_img grayscale);
+
+/* Sobel edge detection */
+sod_img sod_sobel_image(sod_img im);
 
 /* Canny edge detection */
 sod_img sod_canny_edge_image(sod_img im, int reduce_noise);

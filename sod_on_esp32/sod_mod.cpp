@@ -187,6 +187,149 @@ void sod_image_draw_line(sod_img im, sod_pts start, sod_pts end, uint8_t r, uint
 	}
 }
 
+/* Threshold image to binary */
+void sod_threshold_image(sod_img im, uint8_t thresh)
+{
+  if (im.data) {
+    int i;
+    for (i = 0; i < im.w*im.h*im.c; ++i) {
+      im.data[i] = im.data[i] > thresh ? 255 : 0;
+    }
+  }
+  return;
+}
+
+void sod_sobel_threshold_image(sod_img im, uint8_t thresh)
+{
+  if (im.data){
+    int i = 0;
+    int sum = 0;
+    uint8_t average;
+    for(i = 0; i < im.w*im.h*im.c; i++){
+      sum += im.data[i];
+    }
+    average = sum /(im.w * im.h * im.c);
+    for(i = 0; i < im.w*im.h*im.c; i++){
+      im.data[i] = abs(im.data[i] - average) > thresh ? 255 : 0;
+    } 
+  }
+  return;
+}
+
+/* OTSU Thresholding */
+
+void sod_otsu_binarize_image(sod_img im)
+{
+#define OTSU_GRAYLEVEL 256
+  if (im.data) {
+    /* binarization by Otsu's method based on maximization of inter-class variance */
+    int hist[OTSU_GRAYLEVEL];
+    float prob[OTSU_GRAYLEVEL], omega[OTSU_GRAYLEVEL]; /* prob of graylevels */
+    float myu[OTSU_GRAYLEVEL];   /* mean value for separation */
+    double max_sigma, sigma[OTSU_GRAYLEVEL]; /* inter-class variance */
+    uint8_t threshold; /* threshold for binarization */
+    int i; /* Loop variable */
+
+         /* Histogram generation */
+    for (i = 0; i < OTSU_GRAYLEVEL; i++) hist[i] = 0;
+    for (i = 0; i < im.w*im.h*im.c; ++i) {
+      hist[(unsigned char)(im.data[i])]++;
+    }
+    /* calculation of probability density */
+    for (i = 0; i < OTSU_GRAYLEVEL; i++) {
+      prob[i] = (float)hist[i] / (im.w * im.h);
+    }
+    omega[0] = prob[0];
+    myu[0] = 0.0;       /* 0.0 times prob[0] equals zero */
+    for (i = 1; i < OTSU_GRAYLEVEL; i++) {
+      omega[i] = omega[i - 1] + prob[i];
+      myu[i] = myu[i - 1] + i * prob[i];
+    }
+
+    /* sigma maximization
+    sigma stands for inter-class variance
+    and determines optimal threshold value */
+    threshold = 0;
+    max_sigma = 0.0;
+    for (i = 0; i < OTSU_GRAYLEVEL - 1; i++) {
+      if (omega[i] != 0.0 && omega[i] != 1.0)
+        sigma[i] = pow(myu[OTSU_GRAYLEVEL - 1] * omega[i] - myu[i], 2) /
+        (omega[i] * (1.0 - omega[i]));
+      else
+        sigma[i] = 0.0;
+      if (sigma[i] > max_sigma) {
+        max_sigma = sigma[i];
+        threshold = (uint8_t)i;
+      }
+    }
+    /* binarization output */
+    for (i = 0; i < im.w*im.h*im.c; ++i) {
+      im.data[i] = im.data[i] > threshold ? 255 : 0;
+    }
+  }
+  return;
+}
+
+
+
+
+/* Sobel Image Processing */
+sod_img sod_sobel_image(sod_img im)
+{
+  sod_img out;
+  int weight[3][3] = { { -1,  0,  1 },
+  { -2,  0,  2 },
+  { -1,  0,  1 } };
+  int pixel_value;
+  int min, max;
+  int x, y, i, j;  /* Loop variable */
+
+  if (!im.data || im.c != SOD_IMG_GRAYSCALE) {
+    /* Only grayscale images */
+    return sod_make_empty_image(im.w, im.h, im.c);
+  }
+  out = sod_make_image(im.w, im.h, im.c);
+  if (!out.data) {
+    return sod_make_empty_image(im.w, im.h, im.c);
+  }
+  /* Maximum values calculation after filtering*/
+  min = 255 * 4;
+  max = -255 * 4;
+  for (y = 1; y < im.h - 1; y++) {
+    for (x = 1; x < im.w - 1; x++) {
+      pixel_value = 0;
+      for (j = -1; j <= 1; j++) {
+        for (i = -1; i <= 1; i++) {
+          pixel_value += weight[j + 1][i + 1] * im.data[(im.w * (y + j)) + x + i];
+        }
+      }
+      if (pixel_value < min) min = pixel_value;
+      if (pixel_value > max) max = pixel_value;
+    }
+  }
+  if ((max - min) == 0) {
+    return out;
+  }
+  /* Generation of image2 after linear transformation */
+  for (y = 1; y < out.h - 1; y++) {
+    for (x = 1; x < out.w - 1; x++) {
+      pixel_value = 0;
+      for (j = -1; j <= 1; j++) {
+        for (i = -1; i <= 1; i++) {
+          pixel_value += weight[j + 1][i + 1] * im.data[(im.w * (y + j)) + x + i];
+        }
+      }
+      out.data[out.w * y + x] = (int)((float)(pixel_value - min) / (max - min) * 255);
+    }
+  }
+  return out;
+}
+
+
+
+
+
+
 /* Gaussian noise reduce */
 /* INPUT IMAGE MUST BE GRAYSCALE */
 
@@ -313,10 +456,10 @@ static void canny_non_max_suppression(sod_img * img, int *g, int *dir) {
 			case 0:
 				if (g[x + y] > g[x + y - w] && g[x + y] > g[x + y + w]) {
 					if (g[x + y] > 255) {
-						img->data[x + y] = 255.;
+						img->data[x + y] = 255;
 					}
 					else {
-						img->data[x + y] = (float)g[x + y];
+						img->data[x + y] = g[x + y]; //no cast
 					}
 				}
 				else {
@@ -326,10 +469,10 @@ static void canny_non_max_suppression(sod_img * img, int *g, int *dir) {
 			case 1:
 				if (g[x + y] > g[x + y - w - 1] && g[x + y] > g[x + y + w + 1]) {
 					if (g[x + y] > 255) {
-						img->data[x + y] = 255.;
+						img->data[x + y] = 255;
 					}
 					else {
-						img->data[x + y] = (float)g[x + y];
+						img->data[x + y] = g[x + y]; //no cast
 					}
 				}
 				else {
@@ -339,10 +482,10 @@ static void canny_non_max_suppression(sod_img * img, int *g, int *dir) {
 			case 2:
 				if (g[x + y] > g[x + y - 1] && g[x + y] > g[x + y + 1]) {
 					if (g[x + y] > 255) {
-						img->data[x + y] = 255.;
+						img->data[x + y] = 255;
 					}
 					else {
-						img->data[x + y] = (float)g[x + y];
+						img->data[x + y] = g[x + y]; // no cast
 					}
 				}
 				else {
@@ -352,10 +495,10 @@ static void canny_non_max_suppression(sod_img * img, int *g, int *dir) {
 			case 3:
 				if (g[x + y] > g[x + y - w + 1] && g[x + y] > g[x + y + w - 1]) {
 					if (g[x + y] > 255) {
-						img->data[x + y] = 255.;
+						img->data[x + y] = 255;
 					}
 					else {
-						img->data[x + y] = (float)g[x + y];
+						img->data[x + y] = g[x + y]; //no cast
 					}
 				}
 				else {
@@ -420,9 +563,9 @@ static int canny_trace(int x, int y, int low, sod_img * img_in, sod_img * img_ou
 	{
 		img_out->data[y * img_out->w + x] = 255;
 		for (y_off = -1; y_off <= 1; y_off++)
-		{
-			for (x_off = -1; x_off <= 1; x_off++)
-			{
+		{ 
+		  for (x_off = -1; x_off <= 1; x_off++)
+			{ 
 				if (!(y == 0 && x_off == 0) && canny_range(img_in, x + x_off, y + y_off) && (int)(img_in->data[(y + y_off) * img_out->w + x + x_off]) >= low) {
 					if (canny_trace(x + x_off, y + y_off, low, img_in, img_out))
 					{
@@ -458,8 +601,8 @@ static void canny_hysteresis(int high, int low, sod_img * img_in, sod_img * img_
 
 sod_img sod_canny_edge_image(sod_img im, int reduce_noise)
 {
-	if (im.data && im.c == SOD_IMG_GRAYSCALE) {
-		sod_img out, sobel, clean;
+	  if (im.data && im.c == SOD_IMG_GRAYSCALE) {
+		sod_img sobel, clean;
 		int high, low, *g, *dir;
 		if (reduce_noise) {
 			clean = sod_gaussian_noise_reduce(im);
@@ -469,20 +612,22 @@ sod_img sod_canny_edge_image(sod_img im, int reduce_noise)
 			clean = im;
 		}
 		sobel = sod_make_image(im.w, im.h, 1);
-		out = sod_make_image(im.w, im.h, 1);
+//		out = sod_make_image(im.w, im.h, 1);
 		g = (int*) ps_malloc(im.w *(im.h + 16) * sizeof(int));
 		dir = (int*) ps_malloc(im.w *(im.h + 16) * sizeof(int));
-		if (g && dir && sobel.data && out.data) {
+		if (g && dir && sobel.data) {
 			canny_calc_gradient_sobel(&clean, &g[im.w], &dir[im.w]);
 			canny_non_max_suppression(&sobel, &g[im.w], &dir[im.w]);
-			canny_estimate_threshold(&sobel, &high, &low);
-			canny_hysteresis(high, low, &sobel, &out);
+//			canny_estimate_threshold(&sobel, &high, &low);
+//      Serial.println("Passed Threshold");
+//			canny_hysteresis(high, low, &sobel, &out);
+//      Serial.println("Passed Hysteresis test");
 		}
 		if (g)free(g);
 		if (dir)free(dir);
 		if (reduce_noise)sod_free_image(clean);
-		sod_free_image(sobel);
-		return out;
+//		sod_free_image(sobel);
+		return sobel;
 	}
 	/* Make a grayscale version of your image using sod_grayscale_image() or sod_img_load_grayscale() first */
 	return sod_make_empty_image(0, 0, 0);
