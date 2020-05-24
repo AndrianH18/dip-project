@@ -123,6 +123,12 @@ struct sod_pts {
 void sod_free_image(sod_img m);
 void sod_hough_lines_release(sod_pts * pLines);
 
+/* Blobs creation functions */
+int sod_image_find_blobs(sod_img im, sod_box **paBox, int *pnBox, int(*xFilter)(int width, int height));
+void sod_image_blob_boxes_release(sod_box *pBox);
+
+
+
 /* Image creation functions */
 sod_img sod_make_empty_image(int w, int h, int c);
 sod_img sod_make_image(int w, int h, int c);
@@ -131,6 +137,10 @@ sod_img sod_copy_image(sod_img m);
 /* Drawing functions */
 static inline void set_pixel(sod_img m, int x, int y, int c, uint8_t val);
 void sod_image_draw_line(sod_img im, sod_pts start, sod_pts end, uint8_t r, uint8_t g, uint8_t b);
+void sod_image_draw_box(sod_img im, int x1, int y1, int x2, int y2, int r, int g, int b);
+void sod_image_draw_box_grayscale(sod_img im, int x1, int y1, int x2, int y2, int g);
+void sod_image_draw_bbox(sod_img im, sod_box bbox, int r, int g, int b);
+void sod_image_draw_bbox_width(sod_img im, sod_box bbox, int width, int r, int g, int b);
 
 
 /* Threshold function */
@@ -140,12 +150,15 @@ void sod_sobel_threshold_image(sod_img im, uint8_t thresh);
 /* Otsu Threshold function */
 void sod_otsu_binarize_image(sod_img im);
 
-/* Gaussian noise reduce */
-/* INPUT IMAGE MUST BE GRAYSCALE */
-sod_img sod_gaussian_noise_reduce(sod_img grayscale);
+/* Binarization image */
+sod_img sod_binarize_image(sod_img im, int reverse);
 
 /* Sobel edge detection */
 sod_img sod_sobel_image(sod_img im);
+
+/* Gaussian noise reduce */
+/* INPUT IMAGE MUST BE GRAYSCALE */
+sod_img sod_gaussian_noise_reduce(sod_img grayscale);
 
 /* Canny edge detection */
 sod_img sod_canny_edge_image(sod_img im, int reduce_noise);

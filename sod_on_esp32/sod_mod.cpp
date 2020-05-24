@@ -97,6 +97,197 @@ static int SySetPut(SySet *pSet, const void *pItem)
 	return SOD_OK;
 }
 
+static void SySetRelease(SySet *pSet)
+{
+	if (pSet->pBase) {
+		free(pSet->pBase);
+	}
+	pSet->pBase = 0;
+	pSet->nUsed = 0;
+}
+
+typedef struct sod_label_coord sod_label_coord;
+struct sod_label_coord
+{
+	int xmin;
+	int xmax;
+	int ymin;
+	int ymax;
+	sod_label_coord *pNext; /* Next recorded label on the list */
+};
+/*
+* License CPOL, https://www.codeproject.com/Articles/825200/An-Implementation-Of-The-Connected-Component-Label
+*/
+#define CALL_LabelComponent(x,y,returnLabel) { STACK[SP] = x; STACK[SP+1] = y; STACK[SP+2] = returnLabel; SP += 3; goto START; }
+#define ST_RETURN { SP -= 3;                \
+                 switch (STACK[SP+2])    \
+                 {                       \
+                 case 1 : goto RETURN1;  \
+                 case 2 : goto RETURN2;  \
+                 case 3 : goto RETURN3;  \
+                 case 4 : goto RETURN4;  \
+                 default: return;        \
+                 }                       \
+               }
+#define XS (STACK[SP-3])
+#define YS (STACK[SP-2])
+static void LabelComponent(uint16_t* STACK, uint16_t width, uint16_t height, uint8_t* input, sod_label_coord **output, sod_label_coord *pCord, uint16_t x, uint16_t y)
+{
+	STACK[0] = x;
+	STACK[1] = y;
+	STACK[2] = 0;  /* return - component is labeled */
+	int SP = 3;
+	int index;
+
+START: /* Recursive routine starts here */
+
+	index = XS + width * YS;
+	if (input[index] == 0) ST_RETURN;   /* This pixel is not part of a component */
+	if (output[index] != 0) ST_RETURN;   /* This pixel has already been labeled  */
+	output[index] = pCord;
+
+	if (pCord->xmin > XS) pCord->xmin = XS;
+	if (pCord->xmax < XS) pCord->xmax = XS;
+	if (pCord->ymin > YS) pCord->ymin = YS;
+	if (pCord->ymax < YS) pCord->ymax = YS;
+
+	if (XS > 0) CALL_LabelComponent(XS - 1, YS, 1);   /* left  pixel */
+RETURN1:
+
+	if (XS < width - 1) CALL_LabelComponent(XS + 1, YS, 2);   /* right pixel */
+RETURN2:
+
+	if (YS > 0) CALL_LabelComponent(XS, YS - 1, 3);   /* upper pixel */
+RETURN3:
+
+	if (YS < height - 1) CALL_LabelComponent(XS, YS + 1, 4);   /* lower pixel */
+RETURN4:
+
+	ST_RETURN;
+}
+/*
+* CAPIREF: Refer to the official documentation at https://sod.pixlab.io/api.html for the expected parameters this interface takes.
+*/
+static sod_label_coord * LabelImage(sod_img *pImg)
+{
+	sod_label_coord **apCord, *pEntry, *pList = 0;
+	uint16_t width = (uint16_t)pImg->w;
+	uint16_t height = (uint16_t)pImg->h;
+	uint16_t* STACK;
+	int labelNo = 0;
+	int index = -1;
+	uint8_t *input;
+	uint16_t x, y;
+	STACK = (uint16_t *)ps_malloc(3 * sizeof(uint16_t)*(width*height + 1));
+	if (STACK == 0) return 0;
+	apCord = (sod_label_coord **)ps_malloc(width * height * sizeof(sod_label_coord *));
+	if (apCord == 0) {
+		free(STACK);
+		return 0;
+	}
+	memset(apCord, 0, width * height * sizeof(sod_label_coord *));
+	input = pImg->data;
+	for (y = 0; y < height; y++)
+	{
+		for (x = 0; x < width; x++)
+		{
+			index++;
+			if (input[index] == 0) continue;   /* This pixel is not part of a component */
+			if (apCord[index] != 0) continue;   /* This pixel has already been labeled  */
+												/* New component found */
+			pEntry = (sod_label_coord *)ps_malloc(sizeof(sod_label_coord));
+			if (pEntry == 0) {
+				goto finish;
+			}
+			labelNo++;
+			pEntry->xmax = pEntry->ymax = -100;
+			pEntry->xmin = pEntry->ymin = 2147483647;
+			pEntry->pNext = pList;
+			pList = pEntry;
+			LabelComponent(STACK, width, height, input, apCord, pEntry, x, y);
+		}
+	}
+finish:
+	free(STACK);
+	free(apCord);
+	return pList;
+}
+/*
+* CAPIREF: Refer to the official documentation at https://sod.pixlab.io/api.html for the expected parameters this interface takes.
+*/
+int sod_image_find_blobs(sod_img im, sod_box ** paBox, int * pnBox, int(*xFilter)(int width, int height))
+{
+	if (im.c != SOD_IMG_GRAYSCALE || im.data == 0) {
+		/* Must be a binary image */
+		if (pnBox) {
+			*pnBox = 0;
+		}
+		return SOD_UNSUPPORTED;
+	}
+	if (pnBox) {
+		sod_label_coord *pList, *pNext;
+		sod_box sRect;
+		SySet aBox;
+		/* Label that image */
+		pList = LabelImage(&im);
+		SySetInit(&aBox, sizeof(sod_box));
+		while (pList) {
+			pNext = pList->pNext;
+			if (pList->xmax >= 0) {
+				int allow = 1;
+				int h = pList->ymax - pList->ymin;
+				int w = pList->xmax - pList->xmin;
+				if (xFilter) {
+					allow = xFilter(w, h);
+				}
+				if (allow) {
+					sRect.pUserData = 0;
+					sRect.score = 0;
+					sRect.zName = "blob";
+					sRect.x = pList->xmin;
+					sRect.y = pList->ymin;
+					sRect.w = w;
+					sRect.h = h;
+					/* Save the box */
+					SySetPut(&aBox, (const void *)&sRect);
+				}
+			}
+			free(pList);
+			pList = pNext;
+		}
+		*pnBox = (int)SySetUsed(&aBox);
+		if (paBox) {
+			*paBox = (sod_box *)SySetBasePtr(&aBox);
+		}
+		else {
+			SySetRelease(&aBox);
+		}
+	}
+	return SOD_OK;
+}
+/*
+* CAPIREF: Refer to the official documentation at https://sod.pixlab.io/api.html for the expected parameters this interface takes.
+*/
+void sod_image_blob_boxes_release(sod_box * pBox)
+{
+	free(pBox);
+}
+
+sod_img sod_binarize_image(sod_img im, int reverse)
+{
+	sod_img c = sod_copy_image(im);
+	if (c.data) {
+		int i;
+		for (i = 0; i < im.w * im.h * im.c; ++i) {
+			if (c.data[i] > (int)(.5 * 255)) c.data[i] = reverse ? 255 : 0;
+			else c.data[i] = reverse ? 0 : 255;
+		}
+	}
+	return c;
+}
+
+
+
 /* Freeing functions */
 
 void sod_free_image(sod_img m)
@@ -187,17 +378,91 @@ void sod_image_draw_line(sod_img im, sod_pts start, sod_pts end, uint8_t r, uint
 	}
 }
 
-/* Threshold image to binary */
-void sod_threshold_image(sod_img im, uint8_t thresh)
+void sod_image_draw_box_grayscale(sod_img im, int x1, int y1, int x2, int y2, int g)
 {
-  if (im.data) {
-    int i;
-    for (i = 0; i < im.w*im.h*im.c; ++i) {
-      im.data[i] = im.data[i] > thresh ? 255 : 0;
-    }
-  }
-  return;
+	if (im.data) {
+		int i;
+			if (x1 < 0) x1 = 0;
+		if (x1 >= im.w) x1 = im.w - 1;
+		if (x2 < 0) x2 = 0;
+		if (x2 >= im.w) x2 = im.w - 1;
+
+		if (y1 < 0) y1 = 0;
+		if (y1 >= im.h) y1 = im.h - 1;
+		if (y2 < 0) y2 = 0;
+		if (y2 >= im.h) y2 = im.h - 1;
+
+		for (i = x1; i <= x2; ++i) {
+			im.data[i + y1 * im.w] = g;
+			im.data[i + y2 * im.w] = g;
+		}
+		for (i = y1; i <= y2; ++i) {
+			im.data[x1 + i * im.w] = g;
+			im.data[x2 + i * im.w] = g;
+		}
+	}
 }
+
+
+void sod_image_draw_box(sod_img im, int x1, int y1, int x2, int y2, int r, int g, int b)
+{
+	if (im.c == 1) {
+		/* Draw on grayscale image */
+		sod_image_draw_box_grayscale(im, x1, y1, x2, y2, (int)(b * 0.114 + g * 0.587 + r * 0.299));
+		return;
+	}
+	if (im.data) {
+		int i;
+		if (x1 < 0) x1 = 0;
+		if (x1 >= im.w) x1 = im.w - 1;
+		if (x2 < 0) x2 = 0;
+		if (x2 >= im.w) x2 = im.w - 1;
+
+		if (y1 < 0) y1 = 0;
+		if (y1 >= im.h) y1 = im.h - 1;
+		if (y2 < 0) y2 = 0;
+		if (y2 >= im.h) y2 = im.h - 1;
+
+		for (i = x1; i <= x2; ++i) {
+			im.data[i + y1 * im.w + 0 * im.w*im.h] = r;
+			im.data[i + y2 * im.w + 0 * im.w*im.h] = r;
+
+			im.data[i + y1 * im.w + 1 * im.w*im.h] = g;
+			im.data[i + y2 * im.w + 1 * im.w*im.h] = g;
+
+			im.data[i + y1 * im.w + 2 * im.w*im.h] = b;
+			im.data[i + y2 * im.w + 2 * im.w*im.h] = b;
+		}
+		for (i = y1; i <= y2; ++i) {
+			im.data[x1 + i * im.w + 0 * im.w*im.h] = r;
+			im.data[x2 + i * im.w + 0 * im.w*im.h] = r;
+
+			im.data[x1 + i * im.w + 1 * im.w*im.h] = g;
+			im.data[x2 + i * im.w + 1 * im.w*im.h] = g;
+
+			im.data[x1 + i * im.w + 2 * im.w*im.h] = b;
+			im.data[x2 + i * im.w + 2 * im.w*im.h] = b;
+		}
+	}
+}
+/*
+* CAPIREF: Refer to the official documentation at https://sod.pixlab.io/api.html for the expected parameters this interface takes.
+*/
+void sod_image_draw_bbox(sod_img im, sod_box bbox, int r, int g, int b)
+{
+	sod_image_draw_box(im, bbox.x, bbox.y, bbox.x + bbox.w, bbox.y + bbox.h, r, g, b);
+}
+/*
+* CAPIREF: Refer to the official documentation at https://sod.pixlab.io/api.html for the expected parameters this interface takes.
+*/
+void sod_image_draw_bbox_width(sod_img im, sod_box bbox, int width, int r, int g, int b)
+{
+	int i;
+	for (i = 0; i < width; i++) {
+		sod_image_draw_box(im, bbox.x + i, bbox.y + i, (bbox.x + bbox.w) - i, (bbox.y + bbox.h) - i, r, g, b);
+	}
+}
+
 
 void sod_sobel_threshold_image(sod_img im, uint8_t thresh)
 {
@@ -328,8 +593,6 @@ sod_img sod_sobel_image(sod_img im)
 
 
 
-
-
 /* Gaussian noise reduce */
 /* INPUT IMAGE MUST BE GRAYSCALE */
 
@@ -456,10 +719,10 @@ static void canny_non_max_suppression(sod_img * img, int *g, int *dir) {
 			case 0:
 				if (g[x + y] > g[x + y - w] && g[x + y] > g[x + y + w]) {
 					if (g[x + y] > 255) {
-						img->data[x + y] = 255;
+						img->data[x + y] = 255.;
 					}
 					else {
-						img->data[x + y] = g[x + y]; //no cast
+						img->data[x + y] = (float)g[x + y];
 					}
 				}
 				else {
@@ -469,10 +732,10 @@ static void canny_non_max_suppression(sod_img * img, int *g, int *dir) {
 			case 1:
 				if (g[x + y] > g[x + y - w - 1] && g[x + y] > g[x + y + w + 1]) {
 					if (g[x + y] > 255) {
-						img->data[x + y] = 255;
+						img->data[x + y] = 255.;
 					}
 					else {
-						img->data[x + y] = g[x + y]; //no cast
+						img->data[x + y] = (float)g[x + y];
 					}
 				}
 				else {
@@ -482,10 +745,10 @@ static void canny_non_max_suppression(sod_img * img, int *g, int *dir) {
 			case 2:
 				if (g[x + y] > g[x + y - 1] && g[x + y] > g[x + y + 1]) {
 					if (g[x + y] > 255) {
-						img->data[x + y] = 255;
+						img->data[x + y] = 255.;
 					}
 					else {
-						img->data[x + y] = g[x + y]; // no cast
+						img->data[x + y] = (float)g[x + y];
 					}
 				}
 				else {
@@ -495,10 +758,10 @@ static void canny_non_max_suppression(sod_img * img, int *g, int *dir) {
 			case 3:
 				if (g[x + y] > g[x + y - w + 1] && g[x + y] > g[x + y + w - 1]) {
 					if (g[x + y] > 255) {
-						img->data[x + y] = 255;
+						img->data[x + y] = 255.;
 					}
 					else {
-						img->data[x + y] = g[x + y]; //no cast
+						img->data[x + y] = (float)g[x + y];
 					}
 				}
 				else {
@@ -563,9 +826,9 @@ static int canny_trace(int x, int y, int low, sod_img * img_in, sod_img * img_ou
 	{
 		img_out->data[y * img_out->w + x] = 255;
 		for (y_off = -1; y_off <= 1; y_off++)
-		{ 
-		  for (x_off = -1; x_off <= 1; x_off++)
-			{ 
+		{
+			for (x_off = -1; x_off <= 1; x_off++)
+			{
 				if (!(y == 0 && x_off == 0) && canny_range(img_in, x + x_off, y + y_off) && (int)(img_in->data[(y + y_off) * img_out->w + x + x_off]) >= low) {
 					if (canny_trace(x + x_off, y + y_off, low, img_in, img_out))
 					{
@@ -601,8 +864,8 @@ static void canny_hysteresis(int high, int low, sod_img * img_in, sod_img * img_
 
 sod_img sod_canny_edge_image(sod_img im, int reduce_noise)
 {
-	  if (im.data && im.c == SOD_IMG_GRAYSCALE) {
-		sod_img sobel, clean;
+	if (im.data && im.c == SOD_IMG_GRAYSCALE) {
+		sod_img out, sobel, clean;
 		int high, low, *g, *dir;
 		if (reduce_noise) {
 			clean = sod_gaussian_noise_reduce(im);
@@ -612,22 +875,20 @@ sod_img sod_canny_edge_image(sod_img im, int reduce_noise)
 			clean = im;
 		}
 		sobel = sod_make_image(im.w, im.h, 1);
-//		out = sod_make_image(im.w, im.h, 1);
+		out = sod_make_image(im.w, im.h, 1);
 		g = (int*) ps_malloc(im.w *(im.h + 16) * sizeof(int));
 		dir = (int*) ps_malloc(im.w *(im.h + 16) * sizeof(int));
-		if (g && dir && sobel.data) {
+		if (g && dir && sobel.data && out.data) {
 			canny_calc_gradient_sobel(&clean, &g[im.w], &dir[im.w]);
 			canny_non_max_suppression(&sobel, &g[im.w], &dir[im.w]);
-//			canny_estimate_threshold(&sobel, &high, &low);
-//      Serial.println("Passed Threshold");
-//			canny_hysteresis(high, low, &sobel, &out);
-//      Serial.println("Passed Hysteresis test");
+			canny_estimate_threshold(&sobel, &high, &low);
+			canny_hysteresis(high, low, &sobel, &out);
 		}
 		if (g)free(g);
 		if (dir)free(dir);
 		if (reduce_noise)sod_free_image(clean);
-//		sod_free_image(sobel);
-		return sobel;
+		sod_free_image(sobel);
+		return out;
 	}
 	/* Make a grayscale version of your image using sod_grayscale_image() or sod_img_load_grayscale() first */
 	return sod_make_empty_image(0, 0, 0);
