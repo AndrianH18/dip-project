@@ -78,9 +78,28 @@ void setup() {
   Serial.println("=========================================\n");
 }
 
+static int filter_cb(int width, int height)
+    {
+      /* A filter callback invoked by the blob routine each time
+       * a potential blob region is identified.
+       * We use the `width` and `height` parameters supplied
+       * to discard regions of non interest (i.e. too big or too small).
+       */
+      if ((width > 300 && height > 300) || width < 35 || height < 35) {
+        /* Ignore small or big boxes */
+        return 0;
+      }
+      return 1; /* Region accepted */
+    }
+
+
+
 
 void loop() {
   while (Serial.available()) {
+
+    unsigned long start_time = millis();
+
     // Take a picture.
     digitalWrite(4, HIGH);
     fb = esp_camera_fb_get();
@@ -92,16 +111,59 @@ void loop() {
       break;
     }
 
-    delay(50);   // Wait until all characters arrive via UART.
-    flush_serial_buffer();
-
 
     // TIME FOR SOME SOD MAGIC!
     sod_img input_img = sod_make_empty_image(fb->width, fb->height, SOD_IMG_GRAYSCALE);
     input_img.data = fb->buf;
+    
+//    sod_img output_img = sod_sobel_image(sod_gaussian_noise_reduce(input_img));  // Do not reduce noise.
+//    sod_threshold_image(output_img, 210);
+//    sod_otsu_binarize_image(output_img);
+//    sod_sobel_threshold_image(output_img, 30);
 
-    sod_img output_img = sod_canny_edge_image(input_img, 0);  // Do not reduce noise.
+/* Blobs detection and draw box */
 
+    sod_img output_img = sod_binarize_image(input_img, 1);
+    
+
+    
+    sod_box *box = 0;
+    int i, nbox;
+    sod_image_find_blobs(output_img, &box, &nbox, filter_cb);
+    /* `filter_cb`: Our filter callback which was defined above and used to discard small and big regions */
+    /*
+     * Draw a rectangle on each extracted & validated blob region.
+     */
+    Serial.print("number of box :");
+    Serial.println(nbox);
+    for (i = 0; i < nbox; i++) {
+      sod_image_draw_bbox_width(input_img, box[i], 5, 255, 255, 255); /* rose box */
+    }
+
+
+
+
+
+//    sod_pts * aLines;
+//    int i, nPts, nLines;
+//    /* Perform hough line detection on the canny edged image
+//     * Depending on the analyzed image/frame, you should experiment
+//     * with different thresholds for best results.
+//     */
+//    aLines = sod_hough_lines_detect(output_img, 100, &nPts);
+//    /* Report */
+//    nLines = nPts / 2;
+//    printf("%d line(s) were detected\n", nLines);
+//    /* Draw a rose line for each entry on the full color image copy */
+//    for (i = 0; i < nLines; i += 2) {
+//      sod_image_draw_line(output_img, aLines[i], aLines[i + 1], 255, 255, 255);
+//    }
+//    for (i = 0; i < nPts; i++){
+//      Serial.print(aLines[i].x);
+//      Serial.print(" ");
+//      Serial.println(aLines[i].y);
+//    }
+    Serial.println(millis() - start_time);
     // Print out some information and image metadata.
     Serial.print("Width:");
     Serial.println(output_img.w);
@@ -110,26 +172,31 @@ void loop() {
     Serial.println(" ");
 
     // Print image array.
-    if (output_img.data != NULL && output_img.data != 0) {
+    if (input_img.data != NULL && input_img.data != 0) {
       for (unsigned int i = 0; i < 240; i++) {
         for (unsigned int j = 0; j < 320 - 1; j++) {
-          Serial.print( *(output_img.data + (320 * i + j)) );
+          Serial.print( *(input_img.data + (320 * i + j)) );
           Serial.print(F(", "));
         }
-        Serial.println( *(output_img.data + (320 * i + 320 - 1)) );
+        Serial.println( *(input_img.data + (320 * i + 320 - 1)) );
       }
     }
     else {
       Serial.println("output_img pointer is NULL or 0!");
     }
-
+    
     Serial.println(F(" "));
 
-    esp_camera_fb_return(fb);    // Return buffer to be reused.
+    print_free_psram();
 
-    // Flush input buffer.
-    while (Serial.available())
-      Serial.read();
+    esp_camera_fb_return(fb);    // Return buffer to be reused.
+    flush_serial_buffer();       // Flush input buffer.
+
+
+
+//    sod_hough_lines_release(aLines);
+    sod_free_image(input_img);
+    sod_free_image(output_img);
   }
 }
 
