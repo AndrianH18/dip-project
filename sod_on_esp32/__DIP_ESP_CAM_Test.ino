@@ -5,7 +5,6 @@
 
 // Settings
 #define ENABLE_FLASH    1
-#define PRINT_IMG_INFO  0
 
 // Pin definition for CAMERA_MODEL_AI_THINKER
 #define PWDN_GPIO_NUM     32
@@ -85,44 +84,46 @@ void loop() {
     // Take a picture.
     digitalWrite(4, HIGH);
     fb = esp_camera_fb_get();
+    digitalWrite(4, LOW);
     if (!fb) {
       Serial.println("Camera capture failed");
-      while (Serial.available())
-        Serial.read();
-      digitalWrite(4, LOW);
+      delay(50);   // Wait until all characters arrive via UART.
+      flush_serial_buffer();
       break;
     }
 
-    digitalWrite(4, LOW);
+    delay(50);   // Wait until all characters arrive via UART.
+    flush_serial_buffer();
 
 
     // TIME FOR SOME SOD MAGIC!
-    img = sod_make_empty_image(fb->width, fb->height, 1);
-    img.data = fb->buf;
-    
+    sod_img input_img = sod_make_empty_image(fb->width, fb->height, SOD_IMG_GRAYSCALE);
+    input_img.data = fb->buf;
+
+    sod_img output_img = sod_canny_edge_image(input_img, 0);  // Do not reduce noise.
 
     // Print out some information and image metadata.
-    if (PRINT_IMG_INFO) {
-      Serial.println("Camera capture successful!");
-      Serial.print("fb->len:");
-      Serial.println(fb->len);
-      Serial.print("fb->width:");
-      Serial.println(fb->width);
-      Serial.print("fb->height:");
-      Serial.println(fb->height);
-
-      Serial.println("fb->buf:");
-    }
+    Serial.print("Width:");
+    Serial.println(output_img.w);
+    Serial.print("Height:");
+    Serial.println(output_img.h);
+    Serial.println(" ");
 
     // Print image array.
-    for (unsigned int i = 0; i < 240; i++) {
-      for (unsigned int j = 0; j < 320-1; j++) {
-        Serial.printf( "%d, ", *(fb->buf + (320 * i + j)) );
+    if (output_img.data != NULL && output_img.data != 0) {
+      for (unsigned int i = 0; i < 240; i++) {
+        for (unsigned int j = 0; j < 320 - 1; j++) {
+          Serial.print( *(output_img.data + (320 * i + j)) );
+          Serial.print(F(", "));
+        }
+        Serial.println( *(output_img.data + (320 * i + 320 - 1)) );
       }
-      Serial.printf( "%d\n", *(fb->buf + (320 * i + 320-1)) );
+    }
+    else {
+      Serial.println("output_img pointer is NULL or 0!");
     }
 
-    Serial.println(" ");
+    Serial.println(F(" "));
 
     esp_camera_fb_return(fb);    // Return buffer to be reused.
 
@@ -130,4 +131,26 @@ void loop() {
     while (Serial.available())
       Serial.read();
   }
+}
+
+
+void pause(String message) {
+  Serial.println(message);
+  while (!Serial.available());
+  delay(200);
+  while (Serial.available())
+    Serial.read();
+}
+
+
+void flush_serial_buffer() {
+  while (Serial.available())
+    Serial.read();
+}
+
+
+void print_free_psram() {
+  Serial.print(F("Free PSRAM: "));
+  Serial.println(ESP.getFreePsram());
+  Serial.println(F(" "));
 }
