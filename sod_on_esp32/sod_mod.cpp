@@ -82,7 +82,7 @@ static int SySetPut(SySet *pSet, const void *pItem)
 		if (pSet->nSize < 1) {
 			pSet->nSize = 8;
 		}
-		pNew = realloc(pSet->pBase, pSet->eSize * pSet->nSize * 2);
+		pNew = ps_realloc(pSet->pBase, pSet->eSize * pSet->nSize * 2);
 		if (pNew == 0) {
 			return SOD_OUTOFMEM;
 		}
@@ -126,14 +126,14 @@ sod_img sod_make_empty_image(int w, int h, int c)
 sod_img sod_make_image(int w, int h, int c)
 {
 	sod_img out = sod_make_empty_image(w, h, c);
-	out.data = (uint8_t*) calloc(h*w*c, sizeof(uint8_t));
+	out.data = (uint8_t*) ps_calloc(h*w*c, sizeof(uint8_t));
 	return out;
 }
 
 sod_img sod_copy_image(sod_img m)
 {
 	sod_img copy = m;
-	copy.data = (uint8_t*) calloc(m.h*m.w*m.c, sizeof(uint8_t));
+	copy.data = (uint8_t*) ps_calloc(m.h*m.w*m.c, sizeof(uint8_t));
 	if (copy.data && m.data) {
 		memcpy(copy.data, m.data, m.h*m.w*m.c * sizeof(uint8_t));
 	}
@@ -190,12 +190,12 @@ void sod_image_draw_line(sod_img im, sod_pts start, sod_pts end, uint8_t r, uint
 /* Gaussian noise reduce */
 /* INPUT IMAGE MUST BE GRAYSCALE */
 
-
-void sod_gaussian_noise_reduce(sod_img grayscale, sod_img out)
+sod_img sod_gaussian_noise_reduce(sod_img grayscale)
 {
 	int w, h, x, y, max_x, max_y;
+	sod_img img_out;
 	if (!grayscale.data || grayscale.c != SOD_IMG_GRAYSCALE) {
-		return ;
+		return sod_make_empty_image(0, 0, 0);
 	}
 	w = grayscale.w;
 	h = grayscale.h;
@@ -233,59 +233,7 @@ void sod_gaussian_noise_reduce(sod_img grayscale, sod_img out)
 			}
 		}
 	}
-	return;
-}
-
-// Sobel operator for edge detection
-
-void sod_sobel_image(sod_img im, sod_img out)
-{
-	int weight[3][3] = { { -1,  0,  1 },
-	{ -2,  0,  2 },
-	{ -1,  0,  1 } };
-	int pixel_value;
-	int min, max;
-	int x, y, i, j;  /* Loop variable */
-
-	if (!im.data || im.c != SOD_IMG_GRAYSCALE) {
-		/* Only grayscale images */
-		return;
-	}
-	out = sod_make_image(im.w, im.h, im.c);
-	if (!out.data) {
-		return;
-	}
-	/* Maximum values calculation after filtering*/
-	min = 4*255;
-	max = -4*255;
-	for (y = 1; y < im.h - 1; y++) {
-		for (x = 1; x < im.w - 1; x++) {
-			pixel_value = 0;
-			for (j = -1; j <= 1; j++) {
-				for (i = -1; i <= 1; i++) {
-					pixel_value += weight[j + 1][i + 1] * im.data[(im.w * (y + j)) + x + i];
-				}
-			}
-			if (pixel_value < min) min = pixel_value;
-			if (pixel_value > max) max = pixel_value;
-		}
-	}
-	if ((max - min) == 0) {
-		return;
-	}
-	/* Generation of image2 after linear transformation */
-	for (y = 1; y < out.h - 1; y++) {
-		for (x = 1; x < out.w - 1; x++) {
-			pixel_value = 0;
-			for (j = -1; j <= 1; j++) {
-				for (i = -1; i <= 1; i++) {
-					pixel_value += weight[j + 1][i + 1] * im.data[(im.w * (y + j)) + x + i];
-				}
-			}
-			out.data[out.w * y + x] = (uint8_t)((float) (pixel_value - min) / (max - min) * 255);
-		}
-	}
-	return;
+	return img_out;
 }
 
 /* Sobel operator, needed for Canny edge detection */
@@ -522,8 +470,8 @@ sod_img sod_canny_edge_image(sod_img im, int reduce_noise)
 		}
 		sobel = sod_make_image(im.w, im.h, 1);
 		out = sod_make_image(im.w, im.h, 1);
-		g = (int*) malloc(im.w *(im.h + 16) * sizeof(int));
-		dir = (int*) malloc(im.w *(im.h + 16) * sizeof(int));
+		g = (int*) ps_malloc(im.w *(im.h + 16) * sizeof(int));
+		dir = (int*) ps_malloc(im.w *(im.h + 16) * sizeof(int));
 		if (g && dir && sobel.data && out.data) {
 			canny_calc_gradient_sobel(&clean, &g[im.w], &dir[im.w]);
 			canny_non_max_suppression(&sobel, &g[im.w], &dir[im.w]);
@@ -568,7 +516,7 @@ sod_pts * sod_hough_lines_detect(sod_img im, int threshold, int *nPts)
 	accu_h = hough_h * 2.0; /* -r -> +r */
 	accu_w = 180;
 
-	accu = (unsigned int*)calloc(accu_h * accu_w, sizeof(unsigned int));
+	accu = (unsigned int*)ps_calloc(accu_h * accu_w, sizeof(unsigned int));
 	if (accu == 0) {
 		*nPts = 0;
 		return 0;

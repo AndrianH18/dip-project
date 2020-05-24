@@ -134,10 +134,7 @@ void sod_image_draw_line(sod_img im, sod_pts start, sod_pts end, uint8_t r, uint
 
 /* Gaussian noise reduce */
 /* INPUT IMAGE MUST BE GRAYSCALE */
-void sod_gaussian_noise_reduce(sod_img grayscale, sod_img out);
-
-/* Sobel edge detection */
-void sod_sobel_image(sod_img im, sod_img out);
+sod_img sod_gaussian_noise_reduce(sod_img grayscale);
 
 /* Canny edge detection */
 sod_img sod_canny_edge_image(sod_img im, int reduce_noise);
